@@ -4,11 +4,14 @@ import requests
 import threading
 import time
 from datetime import datetime
+import random
 
 app = Flask(__name__)
 CORS(app)
 
-REACTION = "❤️"
+# RANDOM REACTIONS LIST
+REACTIONS = ["❤️", "🥰", "😍", "😘", "🔥"]
+
 ALL_BOTS = []
 
 
@@ -42,11 +45,23 @@ def get_username(token):
 def start_bot(bot):
     print("STARTED BOT:", bot["token"][:12])
 
-    # Owner notification
+    # Owner notification with detailed message
     send_message(
         bot["token"],
         bot["owner_id"],
-        f"🤖 Your bot @{bot['username']} has started successfully!"
+        f"""
+🤖 Your bot @{bot['username']} is now LIVE!
+
+✨ Features:
+• Auto-reaction on every message
+• Random reactions: ❤️ 🥰 😍 😘 🔥
+• Works in Groups, Supergroups, Channels
+• Reacts to edited messages too
+• Sends welcome message when added to a group
+• 24/7 Online – No downtime
+
+Enjoy your premium reaction bot ✨🔥
+"""
     )
 
     while True:
@@ -60,7 +75,7 @@ def start_bot(bot):
                 for upd in res["result"]:
                     bot["offset"] = upd["update_id"] + 1
 
-                    # ----- FIX: HANDLE ALL MESSAGE TYPES -----
+                    # Handle ALL message types (Group, Channel, Edited)
                     msg = {}
                     if "message" in upd:
                         msg = upd["message"]
@@ -72,36 +87,36 @@ def start_bot(bot):
                         msg = upd["edited_channel_post"]
                     else:
                         continue
-                    # ------------------------------------------
 
-                    # 1️⃣ /start for every user
+                    # 1️⃣ User pressed /start
                     if "text" in msg and msg["text"].strip() == "/start":
                         send_message(
                             bot["token"],
                             msg["chat"]["id"],
-                            "👋 Welcome!\nYour bot is active and reacting automatically ❤️"
+                            "👋 Hello! I am your Reaction Bot.\nI react randomly with ❤️🥰😍😘🔥"
                         )
 
-                    # 2️⃣ When bot is added to a group
+                    # 2️⃣ Bot added to group
                     if "new_chat_members" in msg:
                         for m in msg["new_chat_members"]:
                             if m.get("username") == bot["username"]:
                                 send_message(
                                     bot["token"],
                                     msg["chat"]["id"],
-                                    "👋 Hello everyone!\nI will react to all messages automatically ❤️"
+                                    "👋 Hello everyone! I will react randomly with ❤️🥰😍😘🔥"
                                 )
 
-                    # 3️⃣ Reaction for all messages everywhere
+                    # 3️⃣ RANDOM REACTION for all messages
                     if "message_id" in msg:
                         try:
+                            random_emoji = random.choice(REACTIONS)
                             requests.post(
                                 bot["base_url"] + "setMessageReaction",
                                 json={
                                     "chat_id": msg["chat"]["id"],
                                     "message_id": msg["message_id"],
                                     "reaction": [
-                                        {"type": "emoji", "emoji": REACTION}
+                                        {"type": "emoji", "emoji": random_emoji}
                                     ]
                                 },
                                 timeout=5
@@ -153,7 +168,6 @@ def create_bot():
 
     ALL_BOTS.append(bot_obj)
 
-    # Start bot thread
     threading.Thread(target=start_bot, args=(bot_obj,), daemon=True).start()
 
     return jsonify({

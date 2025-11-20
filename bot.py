@@ -1,14 +1,16 @@
-import requests
 from flask import Flask, request, jsonify
+from flask_cors import CORS
+import requests
 import threading
 import time
 from datetime import datetime
 
 app = Flask(__name__)
+CORS(app)
 
 REACTION = "❤️"
 
-# Each bot = {"token", "base_url", "offset", "username", "created"}
+# Each bot = {"token", "base_url", "offset", "username", "created", "owner_id"}
 ALL_BOTS = []
 
 
@@ -25,7 +27,7 @@ def send_message(token, chat_id, text):
 
 
 def get_username(token):
-    """Fetch bot username from Telegram API"""
+    """Fetch bot username"""
     try:
         res = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5).json()
         if res.get("ok"):
@@ -36,12 +38,15 @@ def get_username(token):
 
 
 def start_bot(bot):
-    """Start polling this bot forever"""
-    print("Starting bot:", bot["token"][:12], "...")
+    """Poll updates forever"""
+    print("STARTED BOT:", bot["token"][:12])
 
-    # Send startup message to owner
-    send_message(bot["token"], bot["owner_id"],
-                 f"🤖 Bot Started Successfully!\n@{bot['username']} is now reacting automatically ❤️")
+    # Send start message to owner
+    send_message(
+        bot["token"],
+        bot["owner_id"],
+        f"🤖 Bot Started Successfully!\n@{bot['username']} is now active 24/7 ❤️"
+    )
 
     while True:
         try:
@@ -54,20 +59,20 @@ def start_bot(bot):
                 for upd in res["result"]:
                     bot["offset"] = upd["update_id"] + 1
 
-                    # Welcome message when bot is added to a group
+                    # Welcome message if bot joined group
                     if "message" in upd:
                         msg = upd["message"]
 
-                        # Detect new chat members (bot added)
                         if "new_chat_members" in msg:
-                            for member in msg["new_chat_members"]:
-                                if member.get("username") == bot["username"]:
+                            for m in msg["new_chat_members"]:
+                                if m.get("username") == bot["username"]:
                                     send_message(
-                                        bot["token"], msg["chat"]["id"],
-                                        "👋 Hello everyone!\n\nI'm a Reaction Bot.\nI will react to every message ❤️\n\nThanks for adding me!"
+                                        bot["token"],
+                                        msg["chat"]["id"],
+                                        "👋 Hello everyone!\n\nI am Reaction Bot.\nI will react to all messages ❤️"
                                     )
 
-                        # Normal reaction logic
+                        # Reaction logic
                         if "text" in msg:
                             chat_id = msg["chat"]["id"]
                             msg_id = msg["message_id"]
@@ -91,11 +96,16 @@ def start_bot(bot):
         time.sleep(0.5)
 
 
+@app.route("/")
+def home():
+    return "Unlimited Reaction Bot Maker Backend Running!"
+
+
 @app.route("/create", methods=["POST"])
 def create_bot():
     data = request.get_json()
     token = data.get("token")
-    owner_id = data.get("userId")  # <-- IMPORTANT: Pass user ID from website
+    owner_id = data.get("userId")
 
     if not token:
         return jsonify({"status": "error", "message": "Token missing"})
@@ -103,21 +113,15 @@ def create_bot():
     if not owner_id:
         return jsonify({"status": "error", "message": "Missing userId"})
 
-    base_url = f"https://api.telegram.org/bot{token}/"
-
-    # check if exists
+    # already active?
     for b in ALL_BOTS:
         if b["token"] == token:
-            return jsonify({
-                "status": "ok",
-                "message": "Bot already active."
-            })
+            return jsonify({"status": "ok", "message": "Bot already active!"})
 
     username = get_username(token)
-
     bot_obj = {
         "token": token,
-        "base_url": base_url,
+        "base_url": f"https://api.telegram.org/bot{token}/",
         "offset": 0,
         "username": username,
         "created": datetime.utcnow().isoformat(),
@@ -126,24 +130,23 @@ def create_bot():
 
     ALL_BOTS.append(bot_obj)
 
-    t = threading.Thread(target=start_bot, args=(bot_obj,), daemon=True)
-    t.start()
+    # start thread
+    th = threading.Thread(target=start_bot, args=(bot_obj,), daemon=True)
+    th.start()
 
     return jsonify({
         "status": "ok",
-        "message": f"New bot started successfully!\nBot: @{username}"
+        "message": f"Bot Started Successfully!\nBot: @{username}"
     })
 
 
 @app.route("/global-bots", methods=["GET"])
 def global_bots():
-    result = []
+    bots = []
 
     for b in ALL_BOTS:
-        masked_token = b["token"][:10] + "*****"
-
-        result.append({
-            "token": masked_token,
+        bots.append({
+            "token": b["token"][:10] + "*****",
             "username": b["username"],
             "link": f"https://t.me/{b['username']}",
             "created": b["created"]
@@ -152,7 +155,7 @@ def global_bots():
     return jsonify({
         "status": "ok",
         "total_bots": len(ALL_BOTS),
-        "bots": result
+        "bots": bots
     })
 
 

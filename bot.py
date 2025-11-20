@@ -6,94 +6,93 @@ import time
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all origins
+CORS(app)
 
 REACTION = "❤️"
-
-# Each bot stored as:
-# {"token", "base_url", "offset", "username", "created", "owner_id"}
 ALL_BOTS = []
 
 
-############# BASIC UTILITIES #############
+############# UTILITIES #############
 
 def send_message(token, chat_id, text):
-    """Send text message to a chat."""
     try:
         requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={"chat_id": chat_id, "text": text},
             timeout=5
         )
-    except Exception as e:
-        print("SendMessageError:", e)
+    except:
+        pass
 
 
 def get_username(token):
-    """Fetch Telegram bot username."""
     try:
         res = requests.get(
-            f"https://api.telegram.org/bot{token}/getMe",
-            timeout=5
+            f"https://api.telegram.org/bot{token}/getMe", timeout=5
         ).json()
         if res.get("ok"):
             return res["result"]["username"]
-    except Exception as e:
-        print("UsernameError:", e)
+    except:
+        pass
     return "UnknownBot"
 
 
-############# BOT THREAD #############
+############# BOT LOGIC #############
 
 def start_bot(bot):
-    """Runs in a separate thread for each bot."""
     print("STARTED BOT:", bot["token"][:12])
 
-    # Send startup message to OWNER (optional)
+    # Owner notification
     send_message(
         bot["token"],
         bot["owner_id"],
-        f"🤖 Your bot @{bot['username']} has started!\nIt will react to all messages ❤️"
+        f"🤖 Your bot @{bot['username']} has started successfully!"
     )
 
     while True:
         try:
             res = requests.get(
                 bot["base_url"] + f"getUpdates?offset={bot['offset']}",
-                timeout=5
+                timeout=10
             ).json()
 
             if "result" in res:
                 for upd in res["result"]:
                     bot["offset"] = upd["update_id"] + 1
-                    msg = upd.get("message", {})
 
-                    # -------------------------------
-                    # 1️⃣ Handle /start from ANY USER
-                    # -------------------------------
+                    # ----- FIX: HANDLE ALL MESSAGE TYPES -----
+                    msg = {}
+                    if "message" in upd:
+                        msg = upd["message"]
+                    elif "channel_post" in upd:
+                        msg = upd["channel_post"]
+                    elif "edited_message" in upd:
+                        msg = upd["edited_message"]
+                    elif "edited_channel_post" in upd:
+                        msg = upd["edited_channel_post"]
+                    else:
+                        continue
+                    # ------------------------------------------
+
+                    # 1️⃣ /start for every user
                     if "text" in msg and msg["text"].strip() == "/start":
-                        user_chat = msg["chat"]["id"]
                         send_message(
                             bot["token"],
-                            user_chat,
+                            msg["chat"]["id"],
                             "👋 Welcome!\nYour bot is active and reacting automatically ❤️"
                         )
 
-                    # -------------------------------
-                    # 2️⃣ If bot is added to a group
-                    # -------------------------------
+                    # 2️⃣ When bot is added to a group
                     if "new_chat_members" in msg:
                         for m in msg["new_chat_members"]:
                             if m.get("username") == bot["username"]:
                                 send_message(
                                     bot["token"],
                                     msg["chat"]["id"],
-                                    "👋 Hello everyone!\nI am Reaction Bot.\nI will react to all your messages ❤️"
+                                    "👋 Hello everyone!\nI will react to all messages automatically ❤️"
                                 )
 
-                    # -------------------------------
-                    # 3️⃣ Reaction to every message
-                    # -------------------------------
+                    # 3️⃣ Reaction for all messages everywhere
                     if "message_id" in msg:
                         try:
                             requests.post(
@@ -101,12 +100,14 @@ def start_bot(bot):
                                 json={
                                     "chat_id": msg["chat"]["id"],
                                     "message_id": msg["message_id"],
-                                    "reaction": [{"type": "emoji", "emoji": REACTION}]
+                                    "reaction": [
+                                        {"type": "emoji", "emoji": REACTION}
+                                    ]
                                 },
                                 timeout=5
                             )
-                        except Exception as e:
-                            print("ReactionError:", e)
+                        except:
+                            pass
 
         except Exception as e:
             print("PollingError:", e)
@@ -134,7 +135,7 @@ def create_bot():
     if not owner_id:
         return jsonify({"status": "error", "message": "Missing userId"})
 
-    # Check if bot already exists
+    # Prevent duplicate bot threads
     for b in ALL_BOTS:
         if b["token"] == token:
             return jsonify({"status": "ok", "message": "Bot already active!"})
@@ -153,8 +154,7 @@ def create_bot():
     ALL_BOTS.append(bot_obj)
 
     # Start bot thread
-    th = threading.Thread(target=start_bot, args=(bot_obj,), daemon=True)
-    th.start()
+    threading.Thread(target=start_bot, args=(bot_obj,), daemon=True).start()
 
     return jsonify({
         "status": "ok",
@@ -165,7 +165,6 @@ def create_bot():
 @app.route("/global-bots", methods=["GET"])
 def global_bots():
     bots = []
-
     for b in ALL_BOTS:
         bots.append({
             "token": b["token"][:10] + "*****",
@@ -173,15 +172,10 @@ def global_bots():
             "link": f"https://t.me/{b['username']}",
             "created": b["created"]
         })
-
-    return jsonify({
-        "status": "ok",
-        "total_bots": len(ALL_BOTS),
-        "bots": bots
-    })
+    return jsonify({"status": "ok", "total_bots": len(ALL_BOTS), "bots": bots})
 
 
-############# START APP #############
+############# START SERVER #############
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)

@@ -6,42 +6,50 @@ import time
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Enable CORS for all origins
 
 REACTION = "❤️"
 
-# Each bot = {"token", "base_url", "offset", "username", "created", "owner_id"}
+# Each bot stored as:
+# {"token", "base_url", "offset", "username", "created", "owner_id"}
 ALL_BOTS = []
 
 
+############# BASIC UTILITIES #############
+
 def send_message(token, chat_id, text):
-    """Send normal text message"""
+    """Send text message to a chat."""
     try:
         requests.post(
             f"https://api.telegram.org/bot{token}/sendMessage",
             json={"chat_id": chat_id, "text": text},
             timeout=5
         )
-    except:
-        pass
+    except Exception as e:
+        print("SendMessageError:", e)
 
 
 def get_username(token):
-    """Fetch bot username"""
+    """Fetch Telegram bot username."""
     try:
-        res = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5).json()
+        res = requests.get(
+            f"https://api.telegram.org/bot{token}/getMe",
+            timeout=5
+        ).json()
         if res.get("ok"):
             return res["result"]["username"]
-    except:
-        pass
+    except Exception as e:
+        print("UsernameError:", e)
     return "UnknownBot"
 
 
+############# BOT THREAD #############
+
 def start_bot(bot):
-    """Poll updates forever"""
+    """Runs in a separate thread for each bot."""
     print("STARTED BOT:", bot["token"][:12])
 
-    # Send start message to owner
+    # Send startup message to owner
     send_message(
         bot["token"],
         bot["owner_id"],
@@ -58,43 +66,40 @@ def start_bot(bot):
             if "result" in res:
                 for upd in res["result"]:
                     bot["offset"] = upd["update_id"] + 1
+                    msg = upd.get("message", {})
 
-                    # Welcome message if bot joined group
-                    if "message" in upd:
-                        msg = upd["message"]
-
-                        if "new_chat_members" in msg:
-                            for m in msg["new_chat_members"]:
-                                if m.get("username") == bot["username"]:
-                                    send_message(
-                                        bot["token"],
-                                        msg["chat"]["id"],
-                                        "👋 Hello everyone!\n\nI am Reaction Bot.\nI will react to all messages ❤️"
-                                    )
-
-                        # Reaction logic
-                        if "text" in msg:
-                            chat_id = msg["chat"]["id"]
-                            msg_id = msg["message_id"]
-
-                            try:
-                                requests.post(
-                                    bot["base_url"] + "setMessageReaction",
-                                    json={
-                                        "chat_id": chat_id,
-                                        "message_id": msg_id,
-                                        "reaction": [{"type": "emoji", "emoji": REACTION}]
-                                    },
-                                    timeout=5
+                    # If bot added to a group
+                    if "new_chat_members" in msg:
+                        for m in msg["new_chat_members"]:
+                            if m.get("username") == bot["username"]:
+                                send_message(
+                                    bot["token"],
+                                    msg["chat"]["id"],
+                                    "👋 Hello everyone!\n\nI am Reaction Bot.\nI will react to all your messages ❤️"
                                 )
-                            except:
-                                pass
+
+                    # Add reaction to every message
+                    if "message_id" in msg:
+                        try:
+                            requests.post(
+                                bot["base_url"] + "setMessageReaction",
+                                json={
+                                    "chat_id": msg["chat"]["id"],
+                                    "message_id": msg["message_id"],
+                                    "reaction": [{"type": "emoji", "emoji": REACTION}]
+                                },
+                                timeout=5
+                            )
+                        except Exception as e:
+                            print("ReactionError:", e)
 
         except Exception as e:
-            print("Polling error:", e)
+            print("PollingError:", e)
 
         time.sleep(0.5)
 
+
+############# ROUTES #############
 
 @app.route("/")
 def home():
@@ -104,6 +109,7 @@ def home():
 @app.route("/create", methods=["POST"])
 def create_bot():
     data = request.get_json()
+
     token = data.get("token")
     owner_id = data.get("userId")
 
@@ -113,12 +119,13 @@ def create_bot():
     if not owner_id:
         return jsonify({"status": "error", "message": "Missing userId"})
 
-    # already active?
+    # Check if bot already exists
     for b in ALL_BOTS:
         if b["token"] == token:
             return jsonify({"status": "ok", "message": "Bot already active!"})
 
     username = get_username(token)
+
     bot_obj = {
         "token": token,
         "base_url": f"https://api.telegram.org/bot{token}/",
@@ -130,7 +137,7 @@ def create_bot():
 
     ALL_BOTS.append(bot_obj)
 
-    # start thread
+    # Start bot thread
     th = threading.Thread(target=start_bot, args=(bot_obj,), daemon=True)
     th.start()
 
@@ -158,6 +165,8 @@ def global_bots():
         "bots": bots
     })
 
+
+############# START APP #############
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)

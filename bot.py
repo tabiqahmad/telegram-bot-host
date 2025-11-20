@@ -2,71 +2,93 @@ import requests
 from flask import Flask, request, jsonify
 import threading
 import time
-import os
 
 app = Flask(__name__)
 
-# Global token (initially from environment)
-TOKEN = os.getenv("BOT_TOKEN")
-BASE_URL = f"https://api.telegram.org/bot{TOKEN}/"
 REACTION = "❤️"
-offset = 0
 
-def add_reaction(chat_id, message_id):
-    try:
-        requests.post(
-            BASE_URL + "setMessageReaction",
-            json={
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "reaction": [{"type": "emoji", "emoji": REACTION}]
-            }
-        )
-    except:
-        pass
+# Each bot = {"token": "...", "base_url": "...", "offset": 0}
+ALL_BOTS = []
 
-def poll_messages():
-    global offset, BASE_URL
+
+def start_bot(bot):
+    """Start polling this bot forever"""
+    print("Starting bot:", bot["token"][:15], "...")
     while True:
         try:
-            res = requests.get(BASE_URL + f"getUpdates?offset={offset}").json()
+            url = bot["base_url"] + f"getUpdates?offset={bot['offset']}"
+            res = requests.get(url, timeout=5).json()
 
             if "result" in res:
-                for update in res["result"]:
-                    offset = update["update_id"] + 1
+                for upd in res["result"]:
+                    bot["offset"] = upd["update_id"] + 1
 
-                    if "message" in update:
-                        chat_id = update["message"]["chat"]["id"]
-                        message_id = update["message"]["message_id"]
-                        add_reaction(chat_id, message_id)
+                    if "message" in upd:
+                        chat_id = upd["message"]["chat"]["id"]
+                        msg_id = upd["message"]["message_id"]
+
+                        # send reaction
+                        try:
+                            requests.post(
+                                bot["base_url"] + "setMessageReaction",
+                                json={
+                                    "chat_id": chat_id,
+                                    "message_id": msg_id,
+                                    "reaction": [
+                                        {"type": "emoji", "emoji": REACTION}
+                                    ]
+                                },
+                                timeout=5
+                            )
+                        except:
+                            pass
 
         except Exception as e:
             print("Error:", e)
 
-        time.sleep(1)
+        time.sleep(0.5)
+
 
 @app.route("/")
 def home():
-    return "Reaction bot is running!"
+    return "Unlimited Bot Maker running!"
+
 
 @app.route("/create", methods=["POST"])
-def create_bot():
-    global TOKEN, BASE_URL, offset
-
+def create():
     data = request.get_json()
     token = data.get("token")
 
     if not token:
         return jsonify({"status": "error", "message": "Token missing"})
 
-    TOKEN = token
-    BASE_URL = f"https://api.telegram.org/bot{TOKEN}/"
-    offset = 0  # reset updates pointer
+    base_url = f"https://api.telegram.org/bot{token}/"
 
-    return jsonify({"status": "ok", "message": "Reaction bot activated with new token!"})
+    # Check: bot already exists?
+    for b in ALL_BOTS:
+        if b["token"] == token:
+            return jsonify({
+                "status": "ok",
+                "message": "Bot already active."
+            })
 
-# Start reaction bot thread
-threading.Thread(target=poll_messages).start()
+    # Create bot object
+    bot_obj = {
+        "token": token,
+        "base_url": base_url,
+        "offset": 0
+    }
+    ALL_BOTS.append(bot_obj)
+
+    # Start new thread for this bot
+    t = threading.Thread(target=start_bot, args=(bot_obj,), daemon=True)
+    t.start()
+
+    return jsonify({
+        "status": "ok",
+        "message": "New reaction bot started!"
+    })
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)

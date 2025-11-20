@@ -1,18 +1,15 @@
 import requests
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import threading
 import time
 import os
 
-# TOKEN environment variable se milega (Render me set karoge)
-TOKEN = os.getenv("BOT_TOKEN")
-BASE_URL = f"https://api.telegram.org/bot{TOKEN}/"
-
-# Change this emoji to 👍 ❤️ 😂 🔥 😍 😡 etc
-REACTION = "❤️"
-
 app = Flask(__name__)
 
+# Global token (initially from environment)
+TOKEN = os.getenv("BOT_TOKEN")
+BASE_URL = f"https://api.telegram.org/bot{TOKEN}/"
+REACTION = "❤️"
 offset = 0
 
 def add_reaction(chat_id, message_id):
@@ -29,7 +26,7 @@ def add_reaction(chat_id, message_id):
         pass
 
 def poll_messages():
-    global offset
+    global offset, BASE_URL
     while True:
         try:
             res = requests.get(BASE_URL + f"getUpdates?offset={offset}").json()
@@ -52,7 +49,23 @@ def poll_messages():
 def home():
     return "Reaction bot is running!"
 
-# Background me bot chalu rahega
+@app.route("/create", methods=["POST"])
+def create_bot():
+    global TOKEN, BASE_URL, offset
+
+    data = request.get_json()
+    token = data.get("token")
+
+    if not token:
+        return jsonify({"status": "error", "message": "Token missing"})
+
+    TOKEN = token
+    BASE_URL = f"https://api.telegram.org/bot{TOKEN}/"
+    offset = 0  # reset updates pointer
+
+    return jsonify({"status": "ok", "message": "Reaction bot activated with new token!"})
+
+# Start reaction bot thread
 threading.Thread(target=poll_messages).start()
 
 if __name__ == "__main__":

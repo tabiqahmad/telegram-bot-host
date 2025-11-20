@@ -49,11 +49,11 @@ def start_bot(bot):
     """Runs in a separate thread for each bot."""
     print("STARTED BOT:", bot["token"][:12])
 
-    # Send startup message to owner
+    # Send startup message to OWNER (optional)
     send_message(
         bot["token"],
         bot["owner_id"],
-        f"🤖 Bot Started Successfully!\n@{bot['username']} is now active 24/7 ❤️"
+        f"🤖 Your bot @{bot['username']} has started!\nIt will react to all messages ❤️"
     )
 
     while True:
@@ -68,17 +68,32 @@ def start_bot(bot):
                     bot["offset"] = upd["update_id"] + 1
                     msg = upd.get("message", {})
 
-                    # If bot added to a group
+                    # -------------------------------
+                    # 1️⃣ Handle /start from ANY USER
+                    # -------------------------------
+                    if "text" in msg and msg["text"].strip() == "/start":
+                        user_chat = msg["chat"]["id"]
+                        send_message(
+                            bot["token"],
+                            user_chat,
+                            "👋 Welcome!\nYour bot is active and reacting automatically ❤️"
+                        )
+
+                    # -------------------------------
+                    # 2️⃣ If bot is added to a group
+                    # -------------------------------
                     if "new_chat_members" in msg:
                         for m in msg["new_chat_members"]:
                             if m.get("username") == bot["username"]:
                                 send_message(
                                     bot["token"],
                                     msg["chat"]["id"],
-                                    "👋 Hello everyone!\n\nI am Reaction Bot.\nI will react to all your messages ❤️"
+                                    "👋 Hello everyone!\nI am Reaction Bot.\nI will react to all your messages ❤️"
                                 )
 
-                    # Add reaction to every message
+                    # -------------------------------
+                    # 3️⃣ Reaction to every message
+                    # -------------------------------
                     if "message_id" in msg:
                         try:
                             requests.post(
